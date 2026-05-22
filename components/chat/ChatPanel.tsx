@@ -5,6 +5,9 @@ import { Send, Square } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
+import { SkillsGrid } from '@/components/skills/SkillsGrid';
+import { SlashMenu } from '@/components/skills/SlashMenu';
+import { filterSkills, type LFSkill } from '@/lib/lf-skills';
 
 export interface Message {
   id: string;
@@ -42,6 +45,10 @@ export function ChatPanel({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Slash-command menu state
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -66,8 +73,8 @@ export function ChatPanel({
   useEffect(() => {
     if (!pendingInsert) return;
     setInput(pendingInsert);
+    setSlashOpen(false);
     onPendingInsertConsumed?.();
-    // Focus and resize textarea
     requestAnimationFrame(() => {
       const t = textareaRef.current;
       if (!t) return;
@@ -77,12 +84,18 @@ export function ChatPanel({
     });
   }, [pendingInsert, onPendingInsertConsumed]);
 
-  const handleSubmit = useCallback(async () => {
-    const text = input.trim();
+  const handleSubmit = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
     if (!text || isLoading) return;
 
     setInput('');
+    setSlashOpen(false);
     setIsLoading(true);
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),
@@ -197,45 +210,76 @@ export function ChatPanel({
     );
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // --- Slash command helpers ---
+
+  function handleInputChange(value: string) {
+    setInput(value);
+    if (value.startsWith('/')) {
+      setSlashOpen(true);
+      setSlashIndex(0);
+    } else {
+      setSlashOpen(false);
+    }
+  }
+
+  function handleSkillSelect(skill: LFSkill) {
+    setInput(skill.prompt);
+    setSlashOpen(false);
+    requestAnimationFrame(() => {
+      const t = textareaRef.current;
+      if (!t) return;
+      t.focus();
+      t.style.height = 'auto';
+      t.style.height = Math.min(t.scrollHeight, 144) + 'px';
+    });
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashOpen) {
+      const skills = filterSkills(input);
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashIndex((i) => Math.min(i + 1, skills.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        if (skills[slashIndex]) handleSkillSelect(skills[slashIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSlashOpen(false);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  };
+  }
 
   const isEmpty = messages.length === 0;
 
   return (
     <div className="flex flex-col h-full">
-      {/* Message area */}
+      {/* Message area / empty state */}
       <div className="flex-1 overflow-y-auto">
         {isEmpty ? (
-          <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <span className="text-primary text-xl font-bold">LF</span>
-            </div>
-            <h2 className="text-xl font-semibold">Good day, {userName}!</h2>
-            <p className="text-muted-foreground text-sm max-w-md">
-              Ask me anything — I can read your emails, check your calendar, search OneDrive, or help with Li &amp; Fung workflows.
-            </p>
-            <div className="flex flex-wrap gap-2 justify-center mt-2">
-              {[
-                'Summarize my unread emails',
-                "What's on my calendar today?",
-                'Find recent contract files in OneDrive',
-                'Draft a reply to the latest vendor email',
-              ].map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setInput(s)}
-                  className="text-xs px-3 py-1.5 rounded-full border border-border hover:bg-accent transition-colors"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
+          <SkillsGrid
+            userName={userName}
+            onSelect={(prompt) => {
+              setInput(prompt);
+              requestAnimationFrame(() => {
+                textareaRef.current?.focus();
+              });
+            }}
+          />
         ) : (
           <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
             {messages.map((msg) => (
@@ -257,14 +301,24 @@ export function ChatPanel({
 
       {/* Input area */}
       <div className="border-t border-border p-4">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto relative">
+          {/* Slash command menu */}
+          {slashOpen && (
+            <SlashMenu
+              query={input}
+              selectedIndex={slashIndex}
+              onSelect={handleSkillSelect}
+              onClose={() => setSlashOpen(false)}
+            />
+          )}
+
           <div className="flex gap-2 items-end rounded-xl border border-border bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring px-3 py-2">
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message LF Cowork…"
+              placeholder="Message LF Cowork… or type / for skills"
               rows={1}
               className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground max-h-36 overflow-y-auto"
               style={{ height: 'auto' }}
@@ -284,7 +338,7 @@ export function ChatPanel({
               </button>
             ) : (
               <button
-                onClick={handleSubmit}
+                onClick={() => handleSubmit()}
                 disabled={!input.trim()}
                 className={cn(
                   'p-1.5 rounded-lg transition-colors shrink-0',
@@ -299,7 +353,7 @@ export function ChatPanel({
             )}
           </div>
           <p className="text-xs text-muted-foreground text-center mt-2">
-            Enter to send · Shift+Enter for new line
+            Enter to send · Shift+Enter for new line · / for skills
           </p>
         </div>
       </div>
