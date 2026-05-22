@@ -1,8 +1,26 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Lazy singleton — avoids instantiation at build time when env vars aren't set
+let _openai: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_openai) {
+    _openai = new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseURL: 'https://openrouter.ai/api/v1',
+      defaultHeaders: {
+        'HTTP-Referer': process.env.NEXTAUTH_URL ?? 'http://localhost:3000',
+        'X-Title': 'LF Cowork',
+      },
+    });
+  }
+  return _openai;
+}
+
+// Default model — override via OPENROUTER_MODEL env var
+// Any slug from https://openrouter.ai/models works (e.g. openai/gpt-4o)
+function getModel(): string {
+  return process.env.OPENROUTER_MODEL ?? 'anthropic/claude-sonnet-4-5';
+}
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -17,7 +35,8 @@ export interface AgentStreamParams {
   accessToken?: string;
 }
 
-const SYSTEM_PROMPT = (userName: string, userEmail: string) => `You are LF Cowork, an AI assistant embedded in the Li & Fung enterprise workspace.
+const systemPrompt = (userName: string, userEmail: string) =>
+  `You are LF Cowork, an AI assistant embedded in the Li & Fung enterprise workspace.
 
 The signed-in user is: ${userName} (${userEmail})
 
@@ -25,15 +44,16 @@ You have access to their Microsoft 365 environment through MCP tools — Outlook
 
 Li & Fung context:
 - Global supply chain and logistics company
-- Key business areas: sourcing, merchandising, vendor management, buying trips, sample approvals, costing reviews
-- Users frequently deal with: vendor RFQs, TNA calendars, customer approvals, travel logistics, contract management
+- Key business areas: sourcing, merchandising, vendor management, buying trips, sample approvals, costing reviews, TNA calendars
+- Users frequently deal with: vendor RFQs, customer approvals, travel logistics, contract management, sample feedback
 
 Always be professional, concise, and action-oriented. When performing M365 operations, confirm what you found or did.`;
 
 export async function* streamAgentResponse(params: AgentStreamParams) {
   const { message, history, userName = 'User', userEmail = '' } = params;
 
-  const messages: Anthropic.MessageParam[] = [
+  const messages: OpenAI.ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemPrompt(userName, userEmail) },
     ...history.map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
@@ -41,28 +61,36 @@ export async function* streamAgentResponse(params: AgentStreamParams) {
     { role: 'user', content: message },
   ];
 
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT(userName, userEmail),
+  const stream = await getClient().chat.completions.create({
+    model: getModel(),
     messages,
+    stream: true,
+    max_tokens: 4096,
   });
 
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta') {
-      if (event.delta.type === 'text_delta') {
-        yield { type: 'text', content: event.delta.text };
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta;
+    if (!delta) continue;
+
+    if (delta.content) {
+      yield { type: 'text', content: delta.content };
+    }
+
+    // Tool calls (Phase 3: will be populated when MCP tools are wired in)
+    if (delta.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        if (tc.function?.name) {
+          yield {
+            type: 'tool_use',
+            id: tc.id ?? crypto.randomUUID(),
+            name: tc.function.name,
+            input: tc.function.arguments ? JSON.parse(tc.function.arguments) : {},
+          };
+        }
       }
-    } else if (event.type === 'content_block_start') {
-      if (event.content_block.type === 'tool_use') {
-        yield {
-          type: 'tool_use',
-          id: event.content_block.id,
-          name: event.content_block.name,
-          input: {},
-        };
-      }
-    } else if (event.type === 'message_stop') {
+    }
+
+    if (chunk.choices[0]?.finish_reason === 'stop') {
       yield { type: 'done' };
     }
   }
