@@ -11,6 +11,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.7",
     "@anthropic-ai/sdk": "^0.39.0",
+    "@azure/cosmos": "^4.9.3",
     "@azure/identity": "^4.7.0",
     "@azure/msal-browser": "^3.28.0",
     "@azure/msal-react": "^2.1.0",
