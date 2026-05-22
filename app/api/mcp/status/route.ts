@@ -10,23 +10,21 @@ export async function GET(_req: NextRequest) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 
-  // In Phase 3 this will query the live MCP server process.
-  // For now, return a static capability manifest.
+  const hasCredentials = Boolean(
+    process.env.AZURE_AD_CLIENT_ID &&
+    process.env.AZURE_AD_CLIENT_SECRET &&
+    process.env.AZURE_AD_TENANT_ID
+  );
+
   return Response.json({
-    status: 'configured',
-    servers: [
-      {
-        name: 'm365',
-        package: '@softeria/ms-365-mcp-server',
-        status: process.env.AZURE_AD_CLIENT_ID ? 'ready' : 'missing_credentials',
-        capabilities: [
-          'mail_list', 'mail_send', 'mail_get',
-          'calendar_list_events', 'calendar_create_event',
-          'files_list', 'files_get', 'files_upload',
-          'teams_list', 'teams_send_message',
-          'todo_list', 'todo_create',
-        ],
-      },
+    status: hasCredentials ? 'ready' : 'missing_credentials',
+    tools: [
+      'mail_list', 'mail_get', 'mail_search', 'mail_send', 'mail_reply',
+      'calendar_list_events', 'calendar_create_event',
+      'files_list', 'files_search',
+      'todo_list_tasks', 'todo_create_task',
+      'people_search',
     ],
+    implementation: 'direct-graph-api',
   });
 }

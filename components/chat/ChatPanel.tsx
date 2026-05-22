@@ -27,6 +27,8 @@ interface ChatPanelProps {
   sessionId?: string;
   initialMessages?: Message[];
   onMessagesChange?: (sessionId: string, messages: Message[]) => void;
+  pendingInsert?: string;
+  onPendingInsertConsumed?: () => void;
 }
 
 export function ChatPanel({
@@ -34,11 +36,14 @@ export function ChatPanel({
   sessionId,
   initialMessages = [],
   onMessagesChange,
+  pendingInsert,
+  onPendingInsertConsumed,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const isFirstRender = useRef(true);
 
@@ -56,6 +61,21 @@ export function ChatPanel({
       onMessagesChange(sessionId, messages);
     }
   }, [messages, onMessagesChange, sessionId]);
+
+  // Pre-fill input when a context panel item is clicked
+  useEffect(() => {
+    if (!pendingInsert) return;
+    setInput(pendingInsert);
+    onPendingInsertConsumed?.();
+    // Focus and resize textarea
+    requestAnimationFrame(() => {
+      const t = textareaRef.current;
+      if (!t) return;
+      t.focus();
+      t.style.height = 'auto';
+      t.style.height = Math.min(t.scrollHeight, 144) + 'px';
+    });
+  }, [pendingInsert, onPendingInsertConsumed]);
 
   const handleSubmit = useCallback(async () => {
     const text = input.trim();
@@ -240,6 +260,7 @@ export function ChatPanel({
         <div className="max-w-3xl mx-auto">
           <div className="flex gap-2 items-end rounded-xl border border-border bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring px-3 py-2">
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}

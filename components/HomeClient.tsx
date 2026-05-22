@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { AppSidebar } from '@/components/sidebar/AppSidebar';
 import { ChatPanel, type Message } from '@/components/chat/ChatPanel';
 import { TopBar } from '@/components/layout/TopBar';
+import { ContextPanel } from '@/components/context-panel/ContextPanel';
 
 interface StoredSession {
   id: string;
@@ -40,6 +41,7 @@ interface HomeClientProps {
 export function HomeClient({ userName }: HomeClientProps) {
   const [sessions, setSessions] = useState<StoredSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [pendingInsert, setPendingInsert] = useState<string>('');
 
   // Hydrate from localStorage on mount
   useEffect(() => {
@@ -77,6 +79,11 @@ export function HomeClient({ userName }: HomeClientProps) {
     });
   }, []);
 
+  // Pre-fill the chat input when the user clicks "Ask about this" in the context panel
+  const handleContextInsert = useCallback((text: string) => {
+    setPendingInsert(text);
+  }, []);
+
   const currentSession = sessions.find((s) => s.id === currentSessionId);
 
   const sidebarSessions = sessions.map(({ id, title, updatedAt }) => ({
@@ -97,15 +104,18 @@ export function HomeClient({ userName }: HomeClientProps) {
           onNewChat={handleNewChat}
           onSelectSession={handleSelectSession}
         />
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 overflow-hidden min-w-0">
           <ChatPanel
             key={currentSessionId}
             userName={userName}
             sessionId={currentSessionId}
             initialMessages={currentSession?.messages ?? []}
             onMessagesChange={handleMessagesChange}
+            pendingInsert={pendingInsert}
+            onPendingInsertConsumed={() => setPendingInsert('')}
           />
         </main>
+        <ContextPanel onInsert={handleContextInsert} />
       </div>
     </div>
   );
