@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/cn';
+import { renderMarkdown } from '@/lib/markdown';
 import type { Message } from './ChatPanel';
 
 interface MessageBubbleProps {
@@ -22,20 +23,18 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         )}
       >
         {message.content ? (
-          <div
-            className={cn(
-              'prose prose-sm max-w-none',
-              isUser ? 'prose-invert' : 'dark:prose-invert',
-              message.isStreaming && 'streaming-cursor'
-            )}
-            dangerouslySetInnerHTML={{
-              __html: message.content
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\n/g, '<br />'),
-            }}
-          />
+          isUser ? (
+            // User messages: plain text, preserve line breaks
+            <span className={cn('whitespace-pre-wrap', message.isStreaming && 'streaming-cursor')}>
+              {message.content}
+            </span>
+          ) : (
+            // Assistant messages: render markdown
+            <div
+              className={cn('md-body', message.isStreaming && 'streaming-cursor')}
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
+            />
+          )
         ) : message.isStreaming ? (
           <span className="streaming-cursor" />
         ) : null}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Square, Loader2 } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallCard } from './ToolCallCard';
@@ -25,20 +25,37 @@ export interface ToolCall {
 interface ChatPanelProps {
   userName?: string;
   sessionId?: string;
+  initialMessages?: Message[];
+  onMessagesChange?: (sessionId: string, messages: Message[]) => void;
 }
 
-export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+export function ChatPanel({
+  userName = 'there',
+  sessionId,
+  initialMessages = [],
+  onMessagesChange,
+}: ChatPanelProps) {
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [currentChatId] = useState(() => sessionId ?? crypto.randomUUID());
   const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const isFirstRender = useRef(true);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Persist messages whenever they change (skip initial render)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    if (onMessagesChange && sessionId && messages.length > 0) {
+      onMessagesChange(sessionId, messages);
+    }
+  }, [messages, onMessagesChange, sessionId]);
 
   const handleSubmit = useCallback(async () => {
     const text = input.trim();
@@ -71,19 +88,17 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          chatId: currentChatId,
+          chatId: sessionId,
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
         }),
         signal: abortRef.current.signal,
       });
 
-      if (!res.ok) {
-        throw new Error(`Server error: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
 
       const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
       if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
 
       let buffer = '';
       while (true) {
@@ -98,23 +113,23 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
           if (!line.startsWith('data: ')) continue;
           const raw = line.slice(6).trim();
           if (!raw || raw === '[DONE]') continue;
-
           try {
-            const chunk = JSON.parse(raw);
-            handleChunk(chunk, assistantMsg.id);
+            handleChunk(JSON.parse(raw), assistantMsg.id);
           } catch {
             // skip malformed chunk
           }
         }
       }
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        // user cancelled
-      } else {
+      if (!(err instanceof Error && err.name === 'AbortError')) {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantMsg.id
-              ? { ...m, content: m.content + '\n\n*Error: Could not reach the server.*', isStreaming: false }
+              ? {
+                  ...m,
+                  content: m.content + '\n\n*Error: Could not reach the server.*',
+                  isStreaming: false,
+                }
               : m
           )
         );
@@ -126,7 +141,7 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
       setIsLoading(false);
       abortRef.current = null;
     }
-  }, [input, isLoading, currentChatId, messages]);
+  }, [input, isLoading, sessionId, messages]);
 
   function handleChunk(chunk: Record<string, unknown>, msgId: string) {
     setMessages((prev) =>
@@ -134,7 +149,7 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
         if (m.id !== msgId) return m;
 
         if (chunk.type === 'text') {
-          return { ...m, content: m.content + (chunk.content as string ?? '') };
+          return { ...m, content: m.content + ((chunk.content as string) ?? '') };
         }
 
         if (chunk.type === 'tool_use') {
@@ -167,10 +182,6 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
       e.preventDefault();
       handleSubmit();
     }
-  };
-
-  const handleStop = () => {
-    abortRef.current?.abort();
   };
 
   const isEmpty = messages.length === 0;
@@ -216,7 +227,7 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
                     ))}
                   </div>
                 )}
-                <MessageBubble message={msg} />
+                {(msg.content || msg.isStreaming) && <MessageBubble message={msg} />}
               </div>
             ))}
             <div ref={bottomRef} />
@@ -229,7 +240,6 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
         <div className="max-w-3xl mx-auto">
           <div className="flex gap-2 items-end rounded-xl border border-border bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring px-3 py-2">
             <textarea
-              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -245,7 +255,7 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
             />
             {isLoading ? (
               <button
-                onClick={handleStop}
+                onClick={() => abortRef.current?.abort()}
                 className="p-1.5 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive transition-colors shrink-0"
                 title="Stop generation"
               >
@@ -268,7 +278,7 @@ export function ChatPanel({ userName = 'there', sessionId }: ChatPanelProps) {
             )}
           </div>
           <p className="text-xs text-muted-foreground text-center mt-2">
-            Press Enter to send · Shift+Enter for new line
+            Enter to send · Shift+Enter for new line
           </p>
         </div>
       </div>

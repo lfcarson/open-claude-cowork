@@ -1,8 +1,4 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['@anthropic-ai/claude-agent-sdk'],
-  },
-};
+const nextConfig = {};
 
 export default nextConfig;
