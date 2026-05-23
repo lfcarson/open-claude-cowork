@@ -1,4 +1,4 @@
-// In-process sliding-window rate limiter.
+// In-process fixed-window rate limiter.
 // For multi-instance deployments, replace with Redis (ioredis + sliding-window script).
 
 interface Window {

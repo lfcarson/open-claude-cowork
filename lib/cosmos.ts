@@ -45,10 +45,19 @@ export interface SessionDoc {
   updatedAt: string;
 }
 
-export async function listSessions(userId: string): Promise<SessionDoc[]> {
+/** Lightweight summary returned by listSessions — messages are intentionally excluded. */
+export interface SessionSummary {
+  id: string;
+  userId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listSessions(userId: string): Promise<SessionSummary[]> {
   const container = await getContainer();
   const { resources } = await container.items
-    .query<SessionDoc>({
+    .query<SessionSummary>({
       query: 'SELECT c.id, c.userId, c.title, c.createdAt, c.updatedAt FROM c WHERE c.userId = @userId ORDER BY c.updatedAt DESC',
       parameters: [{ name: '@userId', value: userId }],
     })

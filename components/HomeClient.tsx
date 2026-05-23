@@ -94,6 +94,10 @@ export function HomeClient({ userName }: HomeClientProps) {
   const [usesCosmos, setUsesCosmos] = useState(false);
 
   const cosmosDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the latest session written via handleMessagesChange for Cosmos debounce
+  const cosmosPendingRef = useRef<StoredSession | null>(null);
+  // Gates the localStorage sync useEffect — avoids wiping storage on the very first render
+  const isInitialized = useRef(false);
 
   // ── Mount: detect Cosmos, hydrate sessions ──────────────────────────────
   useEffect(() => {
@@ -128,6 +132,8 @@ export function HomeClient({ userName }: HomeClientProps) {
         setSidebarSessions(stored.map(({ id, title, updatedAt }) => ({ id, title, updatedAt })));
         setCurrentSessionId(stored[0]?.id ?? crypto.randomUUID());
       }
+      // Allow the localStorage sync effect to run from now on
+      isInitialized.current = true;
     }
 
     init();
@@ -142,8 +148,11 @@ export function HomeClient({ userName }: HomeClientProps) {
 
   const handleSelectSession = useCallback(
     async (id: string) => {
-      setCurrentSessionId(id);
-      // Lazy-load full messages from Cosmos if not already in local state
+      // Fetch full messages BEFORE switching session. ChatPanel is keyed on
+      // currentSessionId and uses useState(initialMessages), meaning it only
+      // reads the prop on mount — so messages must be loaded before the key
+      // changes. React 18 automatic batching ensures setSessions and
+      // setCurrentSessionId below render in one pass.
       if (usesCosmos) {
         const existing = sessions.find((s) => s.id === id && s.messages.length > 0);
         if (!existing) {
@@ -155,17 +164,15 @@ export function HomeClient({ userName }: HomeClientProps) {
           }
         }
       }
+      setCurrentSessionId(id);
     },
     [usesCosmos, sessions]
   );
 
   const handleDeleteSession = useCallback(
     async (id: string) => {
-      setSessions((prev) => {
-        const next = prev.filter((s) => s.id !== id);
-        saveLocal(next);
-        return next;
-      });
+      // Pure updaters — the localStorage sync useEffect handles the save
+      setSessions((prev) => prev.filter((s) => s.id !== id));
       setSidebarSessions((prev) => prev.filter((s) => s.id !== id));
 
       if (usesCosmos) await deleteCosmosSession(id);
@@ -181,42 +188,49 @@ export function HomeClient({ userName }: HomeClientProps) {
 
   const handleMessagesChange = useCallback(
     (id: string, messages: Message[]) => {
+      const title = messages.find((m) => m.role === 'user')?.content.slice(0, 50) ?? 'New chat';
+      const updated: StoredSession = { id, title, messages, updatedAt: new Date().toISOString() };
+
+      // Pure updaters — no side effects inside (avoids double-fire in React Strict Mode)
       setSessions((prev) => {
-        const title = messages.find((m) => m.role === 'user')?.content.slice(0, 50) ?? 'New chat';
         const idx = prev.findIndex((s) => s.id === id);
-        const updated: StoredSession = {
-          id,
-          title,
-          messages,
-          updatedAt: new Date().toISOString(),
-        };
         const next =
-          idx >= 0
-            ? prev.map((s) => (s.id === id ? updated : s))
-            : [updated, ...prev];
-        const trimmed = next.slice(0, MAX_SESSIONS);
-
-        // Always persist to localStorage immediately
-        saveLocal(trimmed);
-
-        // Update sidebar sessions list
-        setSidebarSessions(
-          trimmed.map(({ id, title, updatedAt }) => ({ id, title, updatedAt }))
-        );
-
-        // Debounce Cosmos write
-        if (usesCosmos) {
-          if (cosmosDebounceRef.current) clearTimeout(cosmosDebounceRef.current);
-          cosmosDebounceRef.current = setTimeout(() => {
-            pushCosmosSession(updated).catch(console.error);
-          }, COSMOS_DEBOUNCE_MS);
-        }
-
-        return trimmed;
+          idx >= 0 ? prev.map((s) => (s.id === id ? updated : s)) : [updated, ...prev];
+        return next.slice(0, MAX_SESSIONS);
       });
+
+      setSidebarSessions((prev) => {
+        const sidebarItem = { id, title, updatedAt: updated.updatedAt };
+        const idx = prev.findIndex((s) => s.id === id);
+        const next =
+          idx >= 0 ? prev.map((s) => (s.id === id ? sidebarItem : s)) : [sidebarItem, ...prev];
+        return next.slice(0, MAX_SESSIONS);
+      });
+
+      // Debounce Cosmos write (outside any state updater)
+      if (usesCosmos) {
+        cosmosPendingRef.current = updated;
+        if (cosmosDebounceRef.current) clearTimeout(cosmosDebounceRef.current);
+        cosmosDebounceRef.current = setTimeout(() => {
+          const doc = cosmosPendingRef.current;
+          if (doc) pushCosmosSession(doc).catch(console.error);
+        }, COSMOS_DEBOUNCE_MS);
+      }
     },
     [usesCosmos]
   );
+
+  // Sync sessions to localStorage whenever they change (after init hydration)
+  useEffect(() => {
+    if (isInitialized.current) saveLocal(sessions);
+  }, [sessions]);
+
+  // Clean up pending Cosmos debounce timer on unmount (#13)
+  useEffect(() => {
+    return () => {
+      if (cosmosDebounceRef.current) clearTimeout(cosmosDebounceRef.current);
+    };
+  }, []);
 
   const handleContextInsert = useCallback((text: string) => {
     setPendingInsert(text);

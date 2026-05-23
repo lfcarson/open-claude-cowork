@@ -151,9 +151,13 @@ export async function* streamAgentResponse(params: AgentStreamParams) {
         yield { type: 'tool_use', id: tc.id, name: tc.name, input };
 
         let result: string;
-        let isError = false;
+        let isError: boolean;
         if (accessToken) {
-          result = await executeTool(tc.name, input, accessToken);
+          // executeTool returns { content, isError } so the LLM gets the proper
+          // error signal when a Graph call fails (not just a success string).
+          const toolResult = await executeTool(tc.name, input, accessToken);
+          result = toolResult.content;
+          isError = toolResult.isError;
         } else {
           result = 'No M365 access token available. Please sign out and sign in again.';
           isError = true;

@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const isDev = process.env.NODE_ENV === 'development';
+
 const nextConfig = {
   async headers() {
     return [
@@ -18,10 +20,13 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              // Azure AD login redirect
+              // Azure AD login redirect + Graph + OpenRouter + Cosmos
               "connect-src 'self' https://login.microsoftonline.com https://graph.microsoft.com https://openrouter.ai https://*.documents.azure.com",
-              // Next.js HMR in dev
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
+              // unsafe-eval / unsafe-inline are only needed for Next.js HMR in dev;
+              // production builds use compiled output and need neither.
+              isDev
+                ? "script-src 'self' 'unsafe-eval' 'unsafe-inline'"
+                : "script-src 'self'",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https://graph.microsoft.com",
               "frame-ancestors 'none'",

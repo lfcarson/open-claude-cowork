@@ -69,10 +69,11 @@ export function ChatPanel({
     }
   }, [messages, onMessagesChange, sessionId]);
 
-  // Pre-fill input when a context panel item is clicked
+  // Pre-fill input when a context panel item is clicked.
+  // Appends to any existing draft so the user doesn't lose what they were typing.
   useEffect(() => {
     if (!pendingInsert) return;
-    setInput(pendingInsert);
+    setInput((prev) => (prev.trim() ? `${prev}\n\n${pendingInsert}` : pendingInsert));
     setSlashOpen(false);
     onPendingInsertConsumed?.();
     requestAnimationFrame(() => {
@@ -202,6 +203,14 @@ export function ChatPanel({
                 ? { ...tc, result: chunk.content as string, error: chunk.is_error as boolean }
                 : tc
             ),
+          };
+        }
+
+        if (chunk.type === 'error') {
+          return {
+            ...m,
+            content: m.content + `\n\n*Error: ${(chunk.message as string) ?? 'Unknown error'}*`,
+            isStreaming: false,
           };
         }
 

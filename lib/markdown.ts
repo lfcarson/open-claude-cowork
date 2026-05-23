@@ -92,10 +92,15 @@ function inline(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/__(.+?)__/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/_(.+?)_/g, '<em>$1</em>')
+    .replace(/(?<!\w)_(.+?)_(?!\w)/g, '<em>$1</em>')
     .replace(
       /\[([^\]]+)\]\(([^)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>'
+      (_, label, href) => {
+        // Block javascript:, data:, vbscript: and any other non-http(s) scheme
+        const trimmed = href.trim();
+        if (!/^(https?:\/\/|\/)/.test(trimmed)) return label;
+        return `<a href="${escapeAttr(trimmed)}" target="_blank" rel="noopener noreferrer" class="md-link">${label}</a>`;
+      }
     );
 }
 

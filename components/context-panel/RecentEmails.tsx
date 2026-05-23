@@ -22,16 +22,24 @@ export function RecentEmails({ onInsert }: RecentEmailsProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const ctrl = new AbortController();
+
     const params = new URLSearchParams({
       $select: 'id,subject,from,receivedDateTime,isRead,bodyPreview',
       $orderby: 'receivedDateTime desc',
       $top: '15',
     });
 
-    fetch(`/api/graph/me/mailFolders/inbox/messages?${params}`)
+    fetch(`/api/graph/me/mailFolders/inbox/messages?${params}`, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((data) => { setEmails(data.value ?? []); setLoading(false); })
-      .catch((err) => { setError(String(err)); setLoading(false); });
+      .catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setError(String(err));
+        setLoading(false);
+      });
+
+    return () => ctrl.abort();
   }, []);
 
   if (loading) return <p className="p-4 text-xs text-muted-foreground">Loading emails…</p>;

@@ -25,6 +25,8 @@ export function CalendarEvents({ onInsert }: CalendarEventsProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const ctrl = new AbortController();
+
     const now = new Date();
     const end = new Date(now.getTime() + 7 * 86_400_000);
     const params = new URLSearchParams({
@@ -35,10 +37,16 @@ export function CalendarEvents({ onInsert }: CalendarEventsProps) {
       $top: '20',
     });
 
-    fetch(`/api/graph/me/calendarView?${params}`)
+    fetch(`/api/graph/me/calendarView?${params}`, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((data) => { setEvents(data.value ?? []); setLoading(false); })
-      .catch((err) => { setError(String(err)); setLoading(false); });
+      .catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setError(String(err));
+        setLoading(false);
+      });
+
+    return () => ctrl.abort();
   }, []);
 
   if (loading) return <p className="p-4 text-xs text-muted-foreground">Loading calendar…</p>;

@@ -11,6 +11,9 @@ export const dynamic = 'force-dynamic';
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW = 60_000;
 
+// Maximum number of history messages forwarded to the LLM (prevents DoS via huge arrays)
+const MAX_HISTORY = 50;
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -36,7 +39,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { message, messages = [] } = body;
+  const { message, messages: rawMessages = [] } = body;
+  // Trim history to the most recent MAX_HISTORY turns to bound memory + token usage
+  const messages = Array.isArray(rawMessages) ? rawMessages.slice(-MAX_HISTORY) : [];
 
   if (!message || typeof message !== 'string' || message.length > 32_000) {
     return new Response(JSON.stringify({ error: 'Invalid message' }), {

@@ -1,12 +1,37 @@
 import { graphGet, graphPost } from './graph';
 
+export interface ToolResult {
+  content: string;
+  isError: boolean;
+}
+
+/**
+ * Execute an M365 tool and always return a structured result.
+ * isError is true when the underlying Graph call threw, so the LLM
+ * receives the correct error signal and can retry or surface the failure.
+ */
 export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   accessToken: string
-): Promise<string> {
+): Promise<ToolResult> {
   try {
-    switch (name) {
+    const content = await executeToolInner(name, input, accessToken);
+    return { content, isError: false };
+  } catch (err) {
+    return {
+      content: `Error executing ${name}: ${err instanceof Error ? err.message : String(err)}`,
+      isError: true,
+    };
+  }
+}
+
+async function executeToolInner(
+  name: string,
+  input: Record<string, unknown>,
+  accessToken: string
+): Promise<string> {
+  switch (name) {
       case 'mail_list': {
         const folder = (input.folder as string) ?? 'inbox';
         const top = Math.min((input.top as number) ?? 10, 50);
@@ -92,8 +117,10 @@ export async function executeTool(
           : [];
         const event = await graphPost('me/events', accessToken, {
           subject: input.subject,
-          start: { dateTime: input.start, timeZone: 'UTC' },
-          end: { dateTime: input.end, timeZone: 'UTC' },
+          // Use HKT so datetimes the LLM generates (e.g. "09:00:00") land at
+          // the correct local time for Hong Kong users (UTC+8).
+          start: { dateTime: input.start, timeZone: 'Asia/Hong_Kong' },
+          end: { dateTime: input.end, timeZone: 'Asia/Hong_Kong' },
           ...(input.location ? { location: { displayName: input.location } } : {}),
           ...(attendees.length > 0 ? { attendees } : {}),
           ...(input.body ? { body: { contentType: 'Text', content: input.body } } : {}),
@@ -179,11 +206,8 @@ export async function executeTool(
       }
 
       default:
-        return `Unknown tool: ${name}`;
+        throw new Error(`Unknown tool: ${name}`);
     }
-  } catch (err) {
-    return `Error executing ${name}: ${err instanceof Error ? err.message : String(err)}`;
-  }
 }
 
 // --- Type definitions ---

@@ -69,7 +69,10 @@ export const authOptions: NextAuthOptions = {
         return { ...token, ...refreshed, error: undefined };
       } catch (err) {
         console.error('[auth] Token refresh failed:', err);
-        return { ...token, error: 'RefreshAccessTokenError' };
+        // Set expiresAt far in the future so the expiry check is skipped on
+        // subsequent requests — prevents hammering the Microsoft token endpoint
+        // on every page load when the refresh token is permanently revoked.
+        return { ...token, error: 'RefreshAccessTokenError', expiresAt: Number.MAX_SAFE_INTEGER };
       }
     },
     async session({ session, token }) {
