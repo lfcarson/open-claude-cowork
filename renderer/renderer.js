@@ -20,7 +20,9 @@ const sidebarToggle = document.getElementById('sidebarToggle');
 const rightSidebarExpand = document.getElementById('rightSidebarExpand');
 const stepsList = document.getElementById('stepsList');
 const stepsCount = document.getElementById('stepsCount');
+const progressBarFill = document.getElementById('progressBarFill');
 const toolCallsList = document.getElementById('toolCallsList');
+const toolCallsCount = document.getElementById('toolCallsCount');
 const emptySteps = document.getElementById('emptySteps');
 const emptyTools = document.getElementById('emptyTools');
 
@@ -70,7 +72,6 @@ const providerModels = {
 
 // Initialize
 function init() {
-  updateGreeting();
   setupEventListeners();
   loadAllChats();
   renderChatHistory();
@@ -195,7 +196,9 @@ function loadChat(chat) {
   chatTitle.textContent = chat.title;
   isFirstMessage = false;
   todos = chat.todos || [];
-  toolCalls = chat.toolCalls || [];
+  // Restored chats render their tool calls inline within the saved message HTML.
+  // The sidebar list is for live tool activity on the active session only.
+  toolCalls = [];
 
   // Restore provider/model for this chat
   if (chat.provider && providerModels[chat.provider]) {
@@ -203,14 +206,15 @@ function loadChat(chat) {
     updateProviderUI(chat.provider);
   }
   if (chat.model) {
-    selectedModel = chat.model;
+    // updateProviderUI above already regenerated the model menu via updateModelDropdowns,
+    // so the items match the current provider. Now select this chat's saved model.
     const models = providerModels[selectedProvider] || [];
     const modelInfo = models.find(m => m.value === chat.model);
     if (modelInfo) {
+      selectedModel = chat.model;
       document.querySelectorAll('.model-selector .model-label').forEach(l => {
         l.textContent = modelInfo.label;
       });
-      // Update checkmarks in model menu
       document.querySelectorAll('.model-menu .dropdown-item').forEach(item => {
         const isSelected = item.dataset.value === chat.model;
         item.classList.toggle('selected', isSelected);
@@ -224,6 +228,12 @@ function loadChat(chat) {
 
   // Switch to chat view
   switchToChatView();
+
+  // Reset sidebar tool calls — they are re-rendered inline within message HTML below
+  toolCallsList.innerHTML = '';
+  toolCallsList.appendChild(emptyTools);
+  emptyTools.style.display = toolCalls.length === 0 ? 'block' : 'none';
+  updateToolCallsCount();
 
   // Restore messages
   chatMessages.innerHTML = '';
@@ -352,11 +362,6 @@ window.deleteChat = function(chatId, event) {
   }
 
   renderChatHistory();
-}
-
-// Update greeting based on time of day
-function updateGreeting() {
-  // Greeting is now static, no need to update
 }
 
 // Setup all event listeners
@@ -734,8 +739,7 @@ async function stopCurrentQuery() {
     const contentDiv = lastMessage.querySelector('.message-content');
     if (contentDiv) {
       const stoppedNote = document.createElement('p');
-      stoppedNote.style.color = '#888';
-      stoppedNote.style.fontStyle = 'italic';
+      stoppedNote.className = 'stopped-note';
       stoppedNote.textContent = '[Response stopped]';
       contentDiv.appendChild(stoppedNote);
     }
@@ -1151,9 +1155,12 @@ window.startNewChat = function() {
   // Reset sidebar
   stepsList.innerHTML = '';
   emptySteps.style.display = 'block';
-  stepsCount.textContent = '0 steps';
+  stepsCount.textContent = '';
+  progressBarFill.style.width = '0%';
+  progressBarFill.classList.remove('complete');
   toolCallsList.innerHTML = '';
   emptyTools.style.display = 'block';
+  toolCallsCount.textContent = '';
 
   // Switch back to home view
   homeView.classList.remove('hidden');
@@ -1317,6 +1324,7 @@ function addToolCall(name, input, status = 'running') {
   toolCalls.push(toolCall);
 
   emptyTools.style.display = 'none';
+  updateToolCallsCount();
 
   const toolDiv = document.createElement('div');
   toolDiv.className = 'tool-call-item expanded'; // Show expanded by default
@@ -1399,9 +1407,22 @@ window.toggleToolCall = function(header) {
   toolDiv.classList.toggle('expanded');
 };
 
+// Status icons for todo items
+const TODO_STATUS_ICONS = {
+  completed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>',
+  in_progress: '<svg class="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>',
+  pending: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="3.5"></circle></svg>'
+};
+
+const TODO_STATUS_LABELS = {
+  completed: 'Completed',
+  in_progress: 'In progress',
+  pending: 'Pending'
+};
+
 // Update todos from TodoWrite
 function updateTodos(newTodos) {
-  todos = newTodos;
+  todos = Array.isArray(newTodos) ? newTodos : [];
   renderTodos();
 }
 
@@ -1409,36 +1430,54 @@ function updateTodos(newTodos) {
 function renderTodos() {
   stepsList.innerHTML = '';
 
-  if (todos.length === 0) {
+  const total = todos.length;
+  const completed = todos.filter(t => t.status === 'completed').length;
+  const inProgress = todos.find(t => t.status === 'in_progress');
+
+  stepsCount.textContent = total === 0 ? '' : `${completed}/${total}`;
+  const ratio = total === 0 ? 0 : completed / total;
+  progressBarFill.style.width = `${Math.round(ratio * 100)}%`;
+  progressBarFill.classList.toggle('complete', total > 0 && completed === total);
+
+  if (total === 0) {
     emptySteps.style.display = 'block';
-    stepsCount.textContent = '0 steps';
     return;
   }
 
   emptySteps.style.display = 'none';
-  stepsCount.textContent = `${todos.length} steps`;
+
+  let activeStepEl = null;
 
   todos.forEach((todo) => {
+    const status = todo.status || 'pending';
     const stepDiv = document.createElement('div');
-    stepDiv.className = 'step-item';
+    stepDiv.className = `step-item ${status}`;
 
-    const statusIcon = todo.status === 'completed'
-      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>'
-      : todo.status === 'in_progress'
-      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>'
-      : '';
-
-    const displayText = todo.status === 'in_progress' ? (todo.activeForm || todo.content) : todo.content;
+    const displayText = status === 'in_progress' ? (todo.activeForm || todo.content) : todo.content;
+    const icon = TODO_STATUS_ICONS[status] || TODO_STATUS_ICONS.pending;
+    const label = TODO_STATUS_LABELS[status] || TODO_STATUS_LABELS.pending;
 
     stepDiv.innerHTML = `
-      <div class="step-status ${todo.status}">${statusIcon}</div>
+      <div class="step-status ${status}" aria-label="${label}" title="${label}">${icon}</div>
       <div class="step-content">
         <div class="step-text">${escapeHtml(displayText)}</div>
       </div>
     `;
 
     stepsList.appendChild(stepDiv);
+    if (status === 'in_progress') activeStepEl = stepDiv;
   });
+
+  // Bring the active step into view when one exists
+  if (activeStepEl && typeof activeStepEl.scrollIntoView === 'function') {
+    activeStepEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+// Update tool calls section count
+function updateToolCallsCount() {
+  const n = toolCalls.length;
+  toolCallsCount.textContent = n === 0 ? '' : String(n);
 }
 
 // Escape HTML for safe display
@@ -1463,30 +1502,6 @@ function copyMessage(button) {
 }
 
 window.copyMessage = copyMessage;
-
-// Get conversation history for context
-function getConversationHistory() {
-  const messages = Array.from(chatMessages.children);
-  const history = [];
-
-  // Skip the last message (current assistant loading state)
-  for (let i = 0; i < messages.length - 1; i++) {
-    const msg = messages[i];
-    const contentDiv = msg.querySelector('.message-content');
-    if (!contentDiv) continue;
-
-    const content = contentDiv.dataset.rawContent || contentDiv.textContent || '';
-    if (!content.trim()) continue;
-
-    if (msg.classList.contains('user')) {
-      history.push({ role: 'user', content });
-    } else if (msg.classList.contains('assistant')) {
-      history.push({ role: 'assistant', content });
-    }
-  }
-
-  return history;
-}
 
 // Scroll to bottom of messages
 function scrollToBottom() {
